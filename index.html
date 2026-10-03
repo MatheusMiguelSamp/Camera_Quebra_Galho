@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Câmera ao vivo</title>
+<style>
+  :root {
+    --bg: #14181c;
+    --panel: #1d2329;
+    --text: #e8ecef;
+    --muted: #8b97a1;
+    --accent: #3ea6ff;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 16px;
+  }
+  .stage {
+    position: relative;
+    width: min(100%, 960px);
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+  .placeholder {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    text-align: center;
+    color: var(--muted);
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    align-items: center;
+  }
+  button, select {
+    font: inherit;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid #2d363e;
+    border-radius: 8px;
+    padding: 10px 16px;
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: #06121d; border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #status { min-height: 1.4em; font-size: .95rem; color: var(--muted); text-align: center; }
+  #status.error { color: var(--danger); }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <video id="video" autoplay playsinline muted></video>
+  <div class="placeholder" id="placeholder">Clique em “Ativar câmera” e permita o acesso no navegador.</div>
+</div>
+
+<div class="controls">
+  <button id="start" class="primary">Ativar câmera</button>
+  <select id="devices" aria-label="Escolher câmera" disabled></select>
+  <button id="stop" disabled>Parar</button>
+</div>
+
+<div id="status" role="status"></div>
+
+<script>
+  const video = document.getElementById('video');
+  const placeholder = document.getElementById('placeholder');
+  const startBtn = document.getElementById('start');
+  const stopBtn = document.getElementById('stop');
+  const select = document.getElementById('devices');
+  const statusEl = document.getElementById('status');
+  let stream = null;
+
+  function setStatus(msg, isError = false) {
+    statusEl.textContent = msg;
+    statusEl.className = isError ? 'error' : '';
+  }
+
+  async function listCameras() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === 'videoinput');
+    const current = stream?.getVideoTracks()[0]?.getSettings().deviceId;
+    select.innerHTML = '';
+    cams.forEach((cam, i) => {
+      const opt = document.createElement('option');
+      opt.value = cam.deviceId;
+      opt.textContent = cam.label || `Câmera ${i + 1}`;
+      if (cam.deviceId === current) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.disabled = cams.length < 2;
+  }
+
+  async function startCamera(deviceId) {
+    stopCamera();
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setStatus('Este navegador não suporta acesso à câmera (ou a página não está em HTTPS/localhost).', true);
+      return;
+    }
+    try {
+      setStatus('Aguardando permissão…');
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: deviceId ? { deviceId: { exact: deviceId } } : { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      placeholder.hidden = true;
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      await listCameras(); // só mostra os nomes depois da permissão
+      const s = stream.getVideoTracks()[0].getSettings();
+      setStatus(`Câmera ativa — ${s.width}×${s.height}`);
+    } catch (err) {
+      const msgs = {
+        NotAllowedError: 'Permissão negada. Libere o acesso à câmera nas configurações do navegador.',
+        NotFoundError: 'Nenhuma câmera encontrada neste computador.',
+        NotReadableError: 'A câmera está em uso por outro programa. Feche-o e tente de novo.',
+        OverconstrainedError: 'A câmera escolhida não está disponível.'
+      };
+      setStatus(msgs[err.name] || `Erro: ${err.message}`, true);
+    }
+  }
+
+  function stopCamera() {
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+    video.srcObject = null;
+    placeholder.hidden = false;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  }
+
+  startBtn.addEventListener('click', () => startCamera());
+  stopBtn.addEventListener('click', () => { stopCamera(); setStatus('Câmera desligada.'); });
+  select.addEventListener('change', () => startCamera(select.value));
+  window.addEventListener('beforeunload', stopCamera);
+</script>
+</body>
+</html>
